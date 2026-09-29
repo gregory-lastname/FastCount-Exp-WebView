@@ -1,0 +1,55 @@
+name: Сборка Windows приложения (.exe)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Получение исходного кода
+        uses: actions/checkout@v4
+
+      - name: Настройка Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Установка зависимостей проекта
+        run: npm install --legacy-peer-deps
+
+      - name: Установка инструментов сборщика Electron
+        run: npm install --no-save --legacy-peer-deps electron electron-builder
+
+      - name: Сборка веб-приложения (Vite)
+        run: npm run build
+
+      - name: Сборка установщика и портативной версии (.exe)
+        run: npx electron-builder --win nsis portable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Загрузка артефактов в GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: Schitayu-Bystro-Windows
+          path: |
+            release/*.exe
+          retention-days: 30
+
+      - name: Создание релиза на GitHub (если указан тег v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
