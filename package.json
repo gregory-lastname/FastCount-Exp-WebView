@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "fastcount-exp-webview",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "tauri": "tauri",
     "pack:win": "npm run build && electron-builder --win nsis",
     "pack:portable": "npm run build && electron-builder --win portable"
   },
@@ -59,6 +60,8 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.0",
+    "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -66,7 +69,6 @@
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
-    "typescript": "^7.0.2",
-    "@types/express": "^4.17.21"
+    "typescript": "^7.0.2"
   }
 }
