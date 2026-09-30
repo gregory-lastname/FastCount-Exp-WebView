@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { RotateCcw, Volume2, VolumeX, X, AlertTriangle, Music, Keyboard, ListFilter } from 'lucide-react';
-import { SessionSettings, SoundTheme } from '../types/math';
+import { RotateCcw, Volume2, VolumeX, X, AlertTriangle, Music, Keyboard, ListFilter, Zap } from 'lucide-react';
+import { DifficultyLevel, SessionSettings, SoundTheme } from '../types/math';
 import { soundManager } from '../utils/audio';
 
 interface SettingsModalProps {
@@ -119,7 +119,7 @@ export function SettingsModal({
                 soundManager.playKeyTap();
                 onUpdateSettings({ soundEnabled: !settings.soundEnabled });
               }}
-              className={`w-14 h-8 rounded-full p-1 transition-colors ${
+              className={`w-14 h-8 rounded-full p-1 transition-colors cursor-pointer ${
                 settings.soundEnabled ? 'bg-emerald-500' : 'bg-slate-300'
               }`}
             >
@@ -129,6 +129,141 @@ export function SettingsModal({
                 }`}
               />
             </button>
+          </div>
+
+          {/* Timer Settings (Requested by user: full control over timer on/off and duration) */}
+          <div className="p-3.5 rounded-2xl border border-amber-200 bg-amber-50/40 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-200 text-amber-900 flex items-center justify-center text-lg">
+                  ⏱️
+                </div>
+                <div>
+                  <div className="text-sm font-black text-slate-900">Таймер на решение примеров</div>
+                  <div className="text-xs text-slate-500">Ограничение времени для тренировки скорости</div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => {
+                  soundManager.playKeyTap();
+                  onUpdateSettings({ timerEnabled: !settings.timerEnabled });
+                }}
+                className={`w-14 h-8 rounded-full p-1 transition-colors cursor-pointer ${
+                  settings.timerEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                }`}
+              >
+                <div
+                  className={`w-6 h-6 rounded-full bg-white transition-transform ${
+                    settings.timerEnabled ? 'translate-x-6' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {settings.timerEnabled && (
+              <div className="pt-2 border-t border-amber-200/80 space-y-1.5 animate-pop-in">
+                <div className="text-xs font-bold text-slate-700">
+                  Время на один пример:
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {([5, 8, 10, 15] as const).map((sec) => (
+                    <button
+                      key={sec}
+                      onClick={() => {
+                        soundManager.playKeyTap();
+                        onUpdateSettings({ timerSeconds: sec });
+                      }}
+                      className={`py-1.5 rounded-xl border text-xs font-black transition-all cursor-pointer ${
+                        settings.timerSeconds === sec
+                          ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-2xs'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {sec} сек
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Difficulty Level (differential option available for all modes!) */}
+          <div className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                Уровень сложности
+              </div>
+              <span className="text-[10px] text-amber-800 font-bold bg-amber-100 px-2 py-0.5 rounded-full">
+                Для всех режимов
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  soundManager.playKeyTap();
+                  onUpdateSettings({ difficulty: 'differential' });
+                }}
+                className={`btn-tactile p-2.5 rounded-xl border-2 text-left transition-all ${
+                  settings.difficulty === 'differential'
+                    ? 'border-amber-500 bg-amber-50 text-amber-950 font-black ring-2 ring-amber-200 shadow-2xs'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 text-xs font-black text-amber-900">
+                  <Zap className="w-4 h-4 text-amber-600 fill-amber-500" />
+                  <span>Авто</span>
+                </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  Автоматическая подстройка под ученика (1–5)
+                </div>
+              </button>
+
+              <button
+                onClick={() => {
+                  soundManager.playKeyTap();
+                  onUpdateSettings({ difficulty: 1 });
+                }}
+                className={`btn-tactile p-2.5 rounded-xl border-2 text-left transition-all ${
+                  settings.difficulty === 1
+                    ? 'border-amber-500 bg-amber-50 text-amber-950 font-black ring-2 ring-amber-200 shadow-2xs'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="text-xs font-black">1 уровень (до 5)</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Простейшие примеры</div>
+              </button>
+
+              <button
+                onClick={() => {
+                  soundManager.playKeyTap();
+                  onUpdateSettings({ difficulty: 2 });
+                }}
+                className={`btn-tactile p-2.5 rounded-xl border-2 text-left transition-all ${
+                  settings.difficulty === 2
+                    ? 'border-amber-500 bg-amber-50 text-amber-950 font-black ring-2 ring-amber-200 shadow-2xs'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="text-xs font-black">2 уровень (до 10)</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Базовый счёт 2 класса</div>
+              </button>
+
+              <button
+                onClick={() => {
+                  soundManager.playKeyTap();
+                  onUpdateSettings({ difficulty: 3 });
+                }}
+                className={`btn-tactile p-2.5 rounded-xl border-2 text-left transition-all ${
+                  settings.difficulty === 3
+                    ? 'border-amber-500 bg-amber-50 text-amber-950 font-black ring-2 ring-amber-200 shadow-2xs'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="text-xs font-black">3 уровень (до 20)</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">С переходом через десяток</div>
+              </button>
+            </div>
           </div>
 
           {/* Input Mode Choice */}

@@ -6,6 +6,7 @@ import {
   Flame,
   RotateCcw,
   Sparkles,
+  Target,
   Timer as TimerIcon,
   X,
   Zap,
@@ -14,6 +15,8 @@ import { MathProblem, SessionResult, SessionSettings } from '../types/math';
 import { soundManager } from '../utils/audio';
 import { generateProblem } from '../utils/mathGenerator';
 import { TenFrame } from './TenFrame';
+import { NumberHouse } from './NumberHouse';
+import { StepMathExplanation } from './StepMathExplanation';
 
 interface TrainerScreenProps {
   settings: SessionSettings;
@@ -22,12 +25,36 @@ interface TrainerScreenProps {
 }
 
 export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScreenProps) {
-  // Adaptive training mode state
+  // Adaptive / Differential training mode state
   const isAdaptiveMode = settings.mode === 'adaptive_training';
+  const isDifferentialMode = isAdaptiveMode || settings.difficulty === 'differential';
+
   const [adaptiveTier, setAdaptiveTier] = useState<number>(2);
   const [maxAdaptiveTier, setMaxAdaptiveTier] = useState<number>(2);
   const [consecutiveFastCorrect, setConsecutiveFastCorrect] = useState<number>(0);
+  const [consecutiveMistakes, setConsecutiveMistakes] = useState<number>(0);
   const [tierToast, setTierToast] = useState<string | null>(null);
+
+  // House mistake counter, apple aid, and step explanation
+  const [houseMistakes, setHouseMistakes] = useState<number>(0);
+  const houseMistakesRef = useRef<number>(0);
+  useEffect(() => {
+    houseMistakesRef.current = houseMistakes;
+  }, [houseMistakes]);
+  const [showAppleAid, setShowAppleAid] = useState<boolean>(false);
+  const [showHouseExplanation, setShowHouseExplanation] = useState<boolean>(false);
+
+  // Error Piggy Bank ("Копилка ошибок: попробуй ещё раз")
+  const [errorPiggyBank, setErrorPiggyBank] = useState<MathProblem[]>([]);
+  const errorPiggyBankRef = useRef<MathProblem[]>([]);
+  useEffect(() => {
+    errorPiggyBankRef.current = errorPiggyBank;
+  }, [errorPiggyBank]);
+
+  const [isBossRound, setIsBossRound] = useState<boolean>(false);
+  const isBossRoundRef = useRef<boolean>(false);
+  const [bossSolvedCount, setBossSolvedCount] = useState<number>(0);
+  const [bossTotalCount, setBossTotalCount] = useState<number>(0);
 
   // Periodic rest modal in adaptive training
   const [showRestModal, setShowRestModal] = useState<boolean>(false);
@@ -35,7 +62,14 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
 
   // Session queue & state
   const [problemQueue, setProblemQueue] = useState<MathProblem[]>(() => [
-    generateProblem(settings.mode, settings.difficulty, settings.tableRange, null, 2),
+    generateProblem(
+      settings.mode,
+      settings.difficulty,
+      settings.tableRange,
+      null,
+      2,
+      settings.numberBondTarget
+    ),
   ]);
   const [currentProblemIndex, setCurrentProblemIndex] = useState<number>(0);
   const [currentInput, setCurrentInput] = useState<string>('');
@@ -60,9 +94,8 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
   const maxAdaptiveTierRef = useRef<number>(2);
   const consecutiveFastCorrectRef = useRef<number>(0);
 
-  // Timer state
-  const isTimerActive =
-    settings.timerEnabled && (isAdaptiveMode || settings.difficulty !== 1);
+  // Timer state: strictly respects settings.timerEnabled without any difficulty suppressions!
+  const isTimerActive = Boolean(settings.timerEnabled);
   const [timeLeft, setTimeLeft] = useState<number>(settings.timerSeconds);
   const timerIntervalRef = useRef<number | null>(null);
   const problemStartTimeRef = useRef<number>(Date.now());
@@ -119,15 +152,20 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
   const finishSession = useCallback(() => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
 
-    const total = isAdaptiveMode
-      ? Math.max(1, currentProblemIndexRef.current + 1)
-      : settings.sessionLength;
     const finalCorrect = correctCountRef.current;
     const finalMistakes = mistakesCountRef.current;
     const finalBestStreak = bestStreakRef.current;
     const finalTimes = responseTimesRef.current;
 
-    const accuracy = total > 0 ? Math.round((finalCorrect / total) * 100) : 100;
+    // Total problems and attempts: mathematically guaranteed to NEVER produce > 100% or correct > total
+    const totalAttempted = finalCorrect + finalMistakes;
+    const total = Math.max(
+      finalCorrect,
+      totalAttempted,
+      isAdaptiveMode ? currentProblemIndexRef.current + 1 : settings.sessionLength
+    );
+
+    const accuracy = total > 0 ? Math.min(100, Math.max(0, Math.round((finalCorrect / total) * 100))) : 100;
     const avgTime =
       finalTimes.length > 0
         ? Number((finalTimes.reduce((a, b) => a + b, 0) / finalTimes.length).toFixed(1))
@@ -164,6 +202,42 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
     onFinishSession(result);
   }, [settings, isAdaptiveMode, onFinishSession]);
 
+  // Spaced repetition: queue erroneous problem after 2-3 tasks (интервальное повторение)
+  const scheduleIntervalRetry = useCallback(
+    (prob: MathProblem) => {
+      const retryProblem: MathProblem = {
+        ...prob,
+        id: `${prob.id}-retry-${Date.now()}`,
+        isRetry: true,
+      };
+
+      setProblemQueue((prev) => {
+        const copy = [...prev];
+        const currentIdx = currentProblemIndexRef.current;
+        // Target index is 3 steps ahead (e.g. current is 0 -> target is 3, with 2 intervening problems)
+        const targetIdx = currentIdx + 3;
+
+        // Ensure intervening fresh problems exist so the retry is NEVER immediate!
+        while (copy.length < targetIdx) {
+          const lastProb = copy[copy.length - 1];
+          const newProblem = generateProblem(
+            settings.mode,
+            settings.difficulty,
+            settings.tableRange,
+            lastProb,
+            adaptiveTierRef.current,
+            settings.numberBondTarget
+          );
+          copy.push(newProblem);
+        }
+
+        copy.splice(targetIdx, 0, retryProblem);
+        return copy;
+      });
+    },
+    [settings]
+  );
+
   // Advance to next problem
   const moveToNextProblem = useCallback(() => {
     setCurrentInput('');
@@ -171,6 +245,10 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
     setFeedback('idle');
     feedbackRef.current = 'idle';
     setRevealedAnswer(null);
+    setHouseMistakes(0);
+    houseMistakesRef.current = 0;
+    setShowAppleAid(false);
+    setShowHouseExplanation(false);
 
     const nextIndex = currentProblemIndexRef.current + 1;
 
@@ -181,9 +259,42 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
       return;
     }
 
+    // Check if regular session count is reached
     if (!isAdaptiveMode && nextIndex >= settings.sessionLength) {
-      finishSession();
-      return;
+      // Trigger "Копилка ошибок: попробуй ещё раз" if there are errors and boss round not started
+      if (errorPiggyBankRef.current.length > 0 && !isBossRoundRef.current) {
+        const uniqueMistakes = errorPiggyBankRef.current.slice(0, 2).map((p, idx) => ({
+          ...p,
+          id: `${p.id}-piggy-${Date.now()}-${idx}`,
+          isRetry: true,
+        }));
+
+        isBossRoundRef.current = true;
+        setIsBossRound(true);
+        setBossTotalCount(uniqueMistakes.length);
+        setBossSolvedCount(0);
+        soundManager.playLevelUp();
+
+        setProblemQueue((prev) => [...prev, ...uniqueMistakes]);
+        setCurrentProblemIndex(nextIndex);
+        currentProblemIndexRef.current = nextIndex;
+        problemStartTimeRef.current = Date.now();
+        setTimeLeft(settings.timerSeconds);
+        return;
+      }
+
+      // If we are in boss round:
+      if (isBossRoundRef.current) {
+        if (nextIndex < problemQueue.length) {
+          setBossSolvedCount((prev) => prev + 1);
+        } else {
+          finishSession();
+          return;
+        }
+      } else {
+        finishSession();
+        return;
+      }
     }
 
     setProblemQueue((prev) => {
@@ -194,7 +305,8 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
           settings.difficulty,
           settings.tableRange,
           last,
-          adaptiveTierRef.current
+          adaptiveTierRef.current,
+          settings.numberBondTarget
         );
         return [...prev, newProb];
       }
@@ -205,13 +317,78 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
     currentProblemIndexRef.current = nextIndex;
     problemStartTimeRef.current = Date.now();
     setTimeLeft(settings.timerSeconds);
-  }, [settings, isAdaptiveMode, restCount, finishSession]);
+  }, [settings, isAdaptiveMode, restCount, finishSession, problemQueue.length]);
 
   // Handle timeout
   const handleTimeout = useCallback(() => {
     const prob = currentProblemRef.current;
     if (feedbackRef.current !== 'idle' || !prob) return;
 
+    // Collect into error piggy bank
+    setErrorPiggyBank((prev) => {
+      if (prev.some((p) => p.expression === prob.expression)) return prev;
+      const next = [...prev, prob];
+      errorPiggyBankRef.current = next;
+      return next;
+    });
+
+    // 1. NUMBER BONDS TIMEOUT:
+    if (prob.isNumberBond) {
+      soundManager.playError();
+      setCurrentStreak(0);
+
+      if (houseMistakesRef.current === 0) {
+        // First timeout on house:
+        setMistakesCount((prev) => {
+          const next = prev + 1;
+          mistakesCountRef.current = next;
+          return next;
+        });
+
+        if (isDifferentialMode) {
+          setConsecutiveFastCorrect(0);
+          setAdaptiveTier((prev) => Math.max(1, prev - 1));
+        }
+
+        const nextMistakes = 1;
+        houseMistakesRef.current = nextMistakes;
+        setHouseMistakes(nextMistakes);
+
+        // Show flanking apples immediately after 1st mistake!
+        setShowAppleAid(true);
+
+        setFeedback('timeout');
+        feedbackRef.current = 'timeout';
+
+        // Clear input and let child solve with apples visible
+        setTimeout(() => {
+          setFeedback('idle');
+          feedbackRef.current = 'idle';
+          setCurrentInput('');
+          currentInputRef.current = '';
+          setTimeLeft(settings.timerSeconds);
+        }, 450);
+        return;
+      } else {
+        // Second timeout on house (after apples):
+        // "если после яблок снова ошибка, показываем правильный ответ пошагово, с подсветкой"
+        const nextMistakes = 2;
+        houseMistakesRef.current = nextMistakes;
+        setHouseMistakes(nextMistakes);
+
+        setShowHouseExplanation(true);
+        setRevealedAnswer(prob.answer);
+        setFeedback('timeout');
+        feedbackRef.current = 'timeout';
+
+        // Interval repetition 2-3 tasks later
+        scheduleIntervalRetry(prob);
+        // Held until user clicks "Понятно" or presses Enter/Space
+        return;
+      }
+    }
+
+    // 2. STANDARD EQUATION TIMEOUT:
     soundManager.playError();
     setFeedback('timeout');
     feedbackRef.current = 'timeout';
@@ -224,8 +401,8 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
     });
     setCurrentStreak(0);
 
-    // Adaptive difficulty drop on timeout
-    if (isAdaptiveMode) {
+    // Differential difficulty drop on timeout
+    if (isDifferentialMode) {
       setConsecutiveFastCorrect(0);
       setAdaptiveTier((prev) => Math.max(1, prev - 1));
       setTierToast('Немного снизим темп 🧘');
@@ -239,24 +416,10 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
       return next;
     });
 
-    // Re-queue problem
-    const retryProblem: MathProblem = {
-      ...prob,
-      id: `${prob.id}-retry-${Date.now()}`,
-      isRetry: true,
-    };
-
-    setProblemQueue((prev) => {
-      const copy = [...prev];
-      const insertIdx = Math.min(copy.length, currentProblemIndexRef.current + 3);
-      copy.splice(insertIdx, 0, retryProblem);
-      return copy;
-    });
-
-    setTimeout(() => {
-      moveToNextProblem();
-    }, 1800);
-  }, [isAdaptiveMode, moveToNextProblem]);
+    // Re-queue problem (интервальное повторение через 2-3 задания)
+    scheduleIntervalRetry(prob);
+    // Held until user clicks "Понятно" or presses Enter/Space
+  }, [isDifferentialMode, scheduleIntervalRetry, settings.timerSeconds]);
 
   // Timer loop
   useEffect(() => {
@@ -332,20 +495,21 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
           return newStreak;
         });
 
-        // Adaptive difficulty logic: if fast (< 3.8s) and confident, advance tier
-        if (isAdaptiveMode) {
-          const isFast = elapsedSec < 3.8;
+        // Adaptive / Differential difficulty logic: smooth progression
+        if (isDifferentialMode) {
+          setConsecutiveMistakes(0);
+          const isFast = elapsedSec < 4.2;
           if (isFast) {
             setConsecutiveFastCorrect((prev) => {
               const next = prev + 1;
-              if (next >= 2) {
+              if (next >= 3) {
                 setAdaptiveTier((currTier) => {
                   const newTier = Math.min(5, currTier + 1);
                   setMaxAdaptiveTier((m) => Math.max(m, newTier));
                   return newTier;
                 });
-                setTierToast('Отличная скорость и точность! Сложность повышена 🚀');
-                setTimeout(() => setTierToast(null), 2200);
+                setTierToast('Отличная серия! Сложность плавно повышена 🚀');
+                setTimeout(() => setTierToast(null), 2400);
                 return 0;
               }
               return next;
@@ -360,6 +524,90 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
       } else {
         // WRONG ANSWER
         soundManager.playError();
+
+        // 1. NUMBER BONDS SPECIFIC HANDLING (Педагогика состава числа):
+        // "вместо закрепи этот домик после первой ошибки показываем яблоки но не внутри домика а слева и справа так чтобы домик не прыгал вверх. если после яблок снова ошибка, показываем правильный ответ пошагово, с подсветкой. Повтор ошибочного примера через 2–3 задания а не сразу(интервальное повторение)."
+        if (prob.isNumberBond) {
+          setErrorPiggyBank((prev) => {
+            if (prev.some((p) => p.expression === prob.expression)) return prev;
+            const next = [...prev, prob];
+            errorPiggyBankRef.current = next;
+            return next;
+          });
+
+          setCurrentStreak(0);
+
+          if (houseMistakesRef.current === 0) {
+            // FIRST MISTAKE:
+            setMistakesCount((prev) => {
+              const next = prev + 1;
+              mistakesCountRef.current = next;
+              return next;
+            });
+
+            if (isDifferentialMode) {
+              setConsecutiveFastCorrect(0);
+              setConsecutiveMistakes((prev) => {
+                const next = prev + 1;
+                if (next >= 2) {
+                  setAdaptiveTier((currTier) => Math.max(1, currTier - 1));
+                  setTierToast('Закрепим этот уровень 💪');
+                  setTimeout(() => setTierToast(null), 2200);
+                  return 0;
+                }
+                return next;
+              });
+            }
+
+            const nextMistakes = 1;
+            houseMistakesRef.current = nextMistakes;
+            setHouseMistakes(nextMistakes);
+
+            // Flash error state briefly (450ms)
+            setFeedback('wrong');
+            feedbackRef.current = 'wrong';
+
+            // SHOW FLANKING APPLES ON LEFT & RIGHT IMMEDIATELY!
+            setShowAppleAid(true);
+
+            setTimeout(() => {
+              // Clear input and restore idle state so the child can count the apples and solve
+              setFeedback('idle');
+              feedbackRef.current = 'idle';
+              setCurrentInput('');
+              currentInputRef.current = '';
+              if (isTimerActive) {
+                setTimeLeft(settings.timerSeconds);
+              }
+            }, 450);
+            return;
+          } else {
+            // SECOND MISTAKE (AFTER APPLES):
+            // "если после яблок снова ошибка, показываем правильный ответ пошагово, с подсветкой"
+            const nextMistakes = 2;
+            houseMistakesRef.current = nextMistakes;
+            setHouseMistakes(nextMistakes);
+
+            setShowHouseExplanation(true);
+            setRevealedAnswer(prob.answer);
+            setFeedback('wrong');
+            feedbackRef.current = 'wrong';
+
+            // Repeat erroneous problem 2-3 tasks later (интервальное повторение)
+            scheduleIntervalRetry(prob);
+            // Screen is held until user clicks "Понятно, дальше" or presses Enter/Space
+            return;
+          }
+        }
+
+        // 2. STANDARD EQUATION WRONG ANSWER:
+        setErrorPiggyBank((prev) => {
+          if (prev.some((p) => p.expression === prob.expression)) return prev;
+          const next = [...prev, prob];
+          errorPiggyBankRef.current = next;
+          return next;
+        });
+
         setFeedback('wrong');
         feedbackRef.current = 'wrong';
         setRevealedAnswer(prob.answer);
@@ -371,34 +619,27 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
         });
         setCurrentStreak(0);
 
-        // Adaptive adjustment on mistake
-        if (isAdaptiveMode) {
+        // Adaptive adjustment on mistake: smooth step down after 2 consecutive errors
+        if (isDifferentialMode) {
           setConsecutiveFastCorrect(0);
-          setAdaptiveTier((prev) => Math.max(1, prev - 1));
-          setTierToast('Закрепим этот уровень 💪');
-          setTimeout(() => setTierToast(null), 2000);
+          setConsecutiveMistakes((prev) => {
+            const next = prev + 1;
+            if (next >= 2) {
+              setAdaptiveTier((currTier) => Math.max(1, currTier - 1));
+              setTierToast('Закрепим этот уровень 💪');
+              setTimeout(() => setTierToast(null), 2200);
+              return 0;
+            }
+            return next;
+          });
         }
 
-        // Re-queue for reinforcement
-        const retryProblem: MathProblem = {
-          ...prob,
-          id: `${prob.id}-retry-${Date.now()}`,
-          isRetry: true,
-        };
-
-        setProblemQueue((prev) => {
-          const copy = [...prev];
-          const insertIdx = Math.min(copy.length, currentProblemIndexRef.current + 3);
-          copy.splice(insertIdx, 0, retryProblem);
-          return copy;
-        });
-
-        setTimeout(() => {
-          moveToNextProblem();
-        }, 1700);
+        // Re-queue for reinforcement (интервальное повторение через 2-3 задания)
+        scheduleIntervalRetry(prob);
+        // Screen is held until user clicks "Понятно, дальше" or presses Enter/Space
       }
     },
-    [isAdaptiveMode, moveToNextProblem]
+    [isDifferentialMode, isTimerActive, moveToNextProblem, scheduleIntervalRetry, settings.timerSeconds]
   );
 
   const submitAnswerRef = useRef(submitAnswer);
@@ -414,6 +655,16 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
       if (e.key === 'Escape') {
         e.preventDefault();
         setShowExitModal(true);
+        return;
+      }
+
+      // If explanation is currently shown on screen (wrong or timeout), Enter / Space advances
+      if (feedbackRef.current === 'wrong' || feedbackRef.current === 'timeout') {
+        if (e.key === 'Enter' || e.code === 'Space') {
+          e.preventDefault();
+          soundManager.playKeyTap();
+          moveToNextProblem();
+        }
         return;
       }
 
@@ -450,7 +701,7 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showExitModal, showRestModal]);
+  }, [moveToNextProblem, showExitModal, showRestModal]);
 
   if (!currentProblem) return null;
 
@@ -478,12 +729,14 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
             </kbd>
           </button>
 
-          {/* Adaptive Tier Badge or Streak */}
+          {/* Adaptive / Differential Tier Badge or Streak */}
           <div className="flex items-center gap-2">
-            {isAdaptiveMode && (
+            {isDifferentialMode && (
               <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 border border-amber-300 text-amber-950 font-black rounded-xl text-xs shadow-2xs">
                 <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
-                <span>Сложность: {adaptiveTier} / 5</span>
+                <span>
+                  {isAdaptiveMode ? 'Сложность' : 'Авто'}: {adaptiveTier} / 5
+                </span>
               </div>
             )}
 
@@ -517,7 +770,7 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
                 : `Пример ${Math.min(currentProblemIndex + 1, settings.sessionLength)} из ${settings.sessionLength}`}
             </span>
             <span>
-              {isAdaptiveMode ? `Уровень счёта ${adaptiveTier}` : `${progressPercentage}%`}
+              {isDifferentialMode ? `Уровень счёта ${adaptiveTier}` : `${progressPercentage}%`}
             </span>
           </div>
           <div className="w-full bg-slate-200 h-2 sm:h-2.5 rounded-full overflow-hidden p-0.5">
@@ -536,122 +789,181 @@ export function TrainerScreen({ settings, onFinishSession, onExit }: TrainerScre
         )}
       </div>
 
+      {/* RESCUE HERO ROUND: ПРИМЕРЫ, КОТОРЫМ НУЖНА ПОМОЩЬ */}
+      {isBossRound && (
+        <div className="w-full bg-linear-to-r from-amber-400 via-orange-400 to-amber-500 text-amber-950 px-3.5 py-2 rounded-2xl shadow-md border-2 border-amber-300 flex items-center justify-between animate-pop-in shrink-0 mt-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xl sm:text-2xl animate-bounce">🛟</span>
+            <div className="text-left">
+              <span className="font-black text-xs sm:text-sm uppercase tracking-wider block text-amber-950">
+                🦸 Примеры, которым нужна помощь!
+              </span>
+              <span className="text-[10px] sm:text-xs text-amber-900/90 font-bold hidden sm:inline">
+                Помоги сложным примерам найти верный ответ и стань супергероем математики!
+              </span>
+            </div>
+          </div>
+          <div className="bg-white/80 border border-amber-300 px-2.5 py-1 rounded-xl text-xs font-black shrink-0 flex items-center gap-1 text-amber-950 shadow-2xs">
+            <span>Помощь {bossSolvedCount + 1} из {bossTotalCount}</span>
+            <span>✨</span>
+          </div>
+        </div>
+      )}
+
       {/* Center Math Problem Display (With Visual Imprint & Dynamic Reinforcement) */}
-      <div className="my-auto py-2 flex flex-col items-center justify-center flex-1 min-h-0">
-        <div
-          className={`w-full max-w-2xl border-2 sm:border-3 rounded-3xl p-5 sm:p-7 text-center transition-all duration-300 relative ${
-            feedback === 'correct'
-              ? 'border-emerald-500 bg-linear-to-b from-emerald-50 via-teal-50 to-emerald-100/60 ring-8 ring-emerald-300/80 shadow-2xl scale-103'
-              : feedback === 'wrong' || feedback === 'timeout'
-              ? 'border-rose-500 bg-rose-50/60 ring-4 ring-rose-200 shadow-md animate-shake'
-              : 'border-amber-300 bg-white shadow-lg'
-          }`}
-        >
-          {/* Visual Memory Imprint Badge when correct */}
-          {feedback === 'correct' && (
-            <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-500 text-white font-black text-xs uppercase tracking-wider mb-2 shadow-md animate-pop-in">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Запомни этот образ: {currentProblem.expression} = {currentProblem.answer}</span>
-              <Sparkles className="w-3.5 h-3.5" />
-            </div>
-          )}
-
-          {/* Retry notice */}
-          {currentProblem.isRetry && feedback === 'idle' && (
-            <div className="inline-flex items-center gap-1 text-[11px] font-black text-amber-800 bg-amber-100 px-3 py-0.5 rounded-full border border-amber-300 mb-2 animate-pop-in">
-              <RotateCcw className="w-3 h-3" />
-              <span>Повторение ошибки — закрепим результат!</span>
-            </div>
-          )}
-
-          {/* Complete Equation Representation (memorized as a single visual truth) */}
-          <div className="flex items-center justify-center flex-wrap gap-2 sm:gap-4 text-4xl sm:text-6xl md:text-7xl font-black text-slate-900 tracking-wide select-none">
-            <span
-              className={
-                feedback === 'correct'
-                  ? 'text-emerald-950 transition-colors'
-                  : 'text-slate-900'
-              }
-            >
-              {currentProblem.expression}
-            </span>
-            <span
-              className={
-                feedback === 'correct' ? 'text-emerald-600 font-bold' : 'text-slate-400'
-              }
-            >
-              =
-            </span>
-
-            {/* Answer slot */}
-            <div
-              className={`min-w-16 sm:min-w-24 h-16 sm:h-20 px-3 rounded-2xl flex items-center justify-center font-black transition-all duration-200 ${
-                feedback === 'correct'
-                  ? 'bg-emerald-500 text-white shadow-xl scale-110 ring-4 ring-emerald-300'
-                  : feedback === 'wrong' || feedback === 'timeout'
-                  ? 'bg-rose-500 text-white shadow-md'
-                  : currentInput
-                  ? 'bg-amber-100 border-2 border-amber-400 text-amber-950 shadow-inner'
-                  : 'bg-slate-100 border-2 border-dashed border-slate-300 text-slate-400'
-              }`}
-            >
-              {feedback === 'idle' ? (
-                currentInput ? (
-                  currentInput
-                ) : (
-                  <span className="text-slate-400 text-3xl animate-pulse">?</span>
-                )
-              ) : revealedAnswer !== null ? (
-                revealedAnswer
-              ) : (
-                currentProblem.answer
+      <div className="flex-1 flex flex-col items-center justify-center min-h-[380px] sm:min-h-[420px] py-1">
+        {currentProblem.isNumberBond &&
+        currentProblem.bondTarget !== undefined &&
+        currentProblem.bondKnownPart !== undefined &&
+        currentProblem.bondMissingPosition ? (
+          <div className="w-full max-w-xl flex flex-col items-center">
+            {/* Fixed height slot so the house NEVER jumps when retry badge appears */}
+            <div className="h-6 flex items-center justify-center mb-1">
+              {currentProblem.isRetry && feedback === 'idle' && (
+                <div className="inline-flex items-center gap-1 text-[11px] font-black text-amber-800 bg-amber-100 px-3 py-0.5 rounded-full border border-amber-300 animate-pop-in">
+                  <RotateCcw className="w-3 h-3 text-amber-700" />
+                  <span>Интервальное повторение: закрепим домик числа!</span>
+                </div>
               )}
             </div>
+            <NumberHouse
+              target={currentProblem.bondTarget}
+              knownPart={currentProblem.bondKnownPart}
+              missingPosition={currentProblem.bondMissingPosition}
+              currentInput={currentInput}
+              feedback={feedback}
+              correctAnswer={currentProblem.answer}
+              revealedAnswer={revealedAnswer}
+              showAppleAid={showAppleAid}
+              showStepExplanation={showHouseExplanation}
+              onNext={moveToNextProblem}
+            />
           </div>
-
-          {/* Feedback Banner */}
-          <div className="h-8 mt-3 flex items-center justify-center">
+        ) : (
+          <div
+            className={`w-full max-w-2xl border-2 sm:border-3 rounded-3xl p-4 sm:p-6 text-center transition-all duration-300 relative ${
+              feedback === 'correct'
+                ? 'border-emerald-500 bg-linear-to-b from-emerald-50 via-teal-50 to-emerald-100/60 ring-8 ring-emerald-300/80 shadow-2xl scale-103'
+                : feedback === 'wrong' || feedback === 'timeout'
+                ? 'border-amber-400 bg-linear-to-b from-amber-50/90 via-white to-orange-50/60 ring-4 ring-amber-200 shadow-md animate-shake'
+                : 'border-amber-300 bg-white shadow-lg'
+            }`}
+          >
+            {/* Visual Memory Imprint Badge when correct */}
             {feedback === 'correct' && (
-              <div className="flex items-center gap-2 text-emerald-800 font-black text-base sm:text-lg animate-pop-in">
-                <Check className="w-6 h-6 stroke-[3] text-emerald-600" />
-                <span>Отлично!</span>
-                <span className="font-mono bg-white text-emerald-950 px-2.5 py-0.5 rounded-xl border border-emerald-300 shadow-2xs">
-                  {currentProblem.expression} = {currentProblem.answer}
-                </span>
-                <span>🌟</span>
+              <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-emerald-500 text-white font-black text-xs uppercase tracking-wider mb-2 shadow-md animate-pop-in">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Запомни этот образ: {currentProblem.expression} = {currentProblem.answer}</span>
+                <Sparkles className="w-3.5 h-3.5" />
               </div>
             )}
-            {(feedback === 'wrong' || feedback === 'timeout') && (
-              <div className="flex items-center gap-1.5 text-rose-600 font-black text-sm sm:text-base animate-pop-in">
-                <X className="w-5 h-5 stroke-[3]" />
-                <span>
-                  {feedback === 'timeout' ? 'Время вышло! ' : 'Ошибка! '}
-                  Правильный ответ: <strong className="underline text-lg ml-1">{currentProblem.answer}</strong>
-                </span>
-              </div>
-            )}
-            {feedback === 'idle' && (
-              <span className="text-xs text-slate-400 font-medium">
-                Набирай цифры на клавиатуре и нажимай Enter
-              </span>
-            )}
-          </div>
 
-          {/* Ten-Frame visual aid for 2-term mistakes */}
-          {(feedback === 'wrong' || feedback === 'timeout') &&
-            currentProblem.operands.length === 2 &&
-            currentProblem.operators.length === 1 &&
-            (currentProblem.operators[0] === '+' || currentProblem.operators[0] === '−') && (
-              <div className="mt-2 animate-pop-in">
-                <TenFrame
-                  a={currentProblem.operands[0]}
-                  b={currentProblem.operands[1]}
-                  operator={currentProblem.operators[0] === '+' ? '+' : '-'}
-                  showAnswer={true}
-                />
+            {/* Interval retry notice in fixed height slot */}
+            <div className="h-6 flex items-center justify-center mb-1">
+              {currentProblem.isRetry && feedback === 'idle' && (
+                <div className="inline-flex items-center gap-1.5 text-xs font-black text-amber-900 bg-amber-100/90 px-3.5 py-0.5 rounded-full border border-amber-300 animate-pop-in shadow-2xs">
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-700 animate-spin" />
+                  <span>Повторение: помогаем закрепить пример!</span>
+                </div>
+              )}
+            </div>
+
+            {/* Complete Equation Representation (memorized as a single visual truth) */}
+            <div className="flex items-center justify-center flex-wrap gap-2 sm:gap-4 text-4xl sm:text-6xl md:text-7xl font-black text-slate-900 tracking-wide select-none">
+              <span
+                className={
+                  feedback === 'correct'
+                    ? 'text-emerald-950 transition-colors'
+                    : 'text-slate-900'
+                }
+              >
+                {currentProblem.expression}
+              </span>
+              <span
+                className={
+                  feedback === 'correct' ? 'text-emerald-600 font-bold' : 'text-slate-400'
+                }
+              >
+                =
+              </span>
+
+              {/* Answer slot */}
+              <div
+                className={`min-w-16 sm:min-w-24 h-16 sm:h-20 px-3 rounded-2xl flex items-center justify-center font-black transition-all duration-200 ${
+                  feedback === 'correct'
+                    ? 'bg-emerald-500 text-white shadow-xl scale-110 ring-4 ring-emerald-300'
+                    : feedback === 'wrong' || feedback === 'timeout'
+                    ? 'bg-amber-400 text-amber-950 border-2 border-amber-500 shadow-md font-mono'
+                    : currentInput
+                    ? 'bg-amber-100 border-2 border-amber-400 text-amber-950 shadow-inner'
+                    : 'bg-slate-100 border-2 border-dashed border-slate-300 text-slate-400'
+                }`}
+              >
+                {feedback === 'idle' ? (
+                  currentInput ? (
+                    currentInput
+                  ) : (
+                    <span className="text-slate-400 text-3xl animate-pulse">?</span>
+                  )
+                ) : revealedAnswer !== null ? (
+                  revealedAnswer
+                ) : (
+                  currentProblem.answer
+                )}
+              </div>
+            </div>
+
+            {/* Feedback Banner */}
+            <div className="h-8 mt-3 flex items-center justify-center">
+              {feedback === 'correct' && (
+                <div className="flex items-center gap-2 text-emerald-800 font-black text-base sm:text-lg animate-pop-in">
+                  <Check className="w-6 h-6 stroke-[3] text-emerald-600" />
+                  <span>Отлично!</span>
+                  <span className="font-mono bg-white text-emerald-950 px-2.5 py-0.5 rounded-xl border border-emerald-300 shadow-2xs">
+                    {currentProblem.expression} = {currentProblem.answer}
+                  </span>
+                  <span>🌟</span>
+                </div>
+              )}
+              {(feedback === 'wrong' || feedback === 'timeout') && (
+                <div className="flex items-center gap-1.5 text-amber-950 font-black text-xs sm:text-sm animate-pop-in bg-amber-100/90 px-3.5 py-1 rounded-full border border-amber-300 shadow-2xs">
+                  <span className="text-base">🛟</span>
+                  <span>
+                    {feedback === 'timeout' ? 'Время вышло! ' : 'Нужна помощь спасателя! '}
+                    Правильный ответ: <strong className="underline text-emerald-800 text-base font-mono font-black ml-1">{currentProblem.answer}</strong>
+                  </span>
+                </div>
+              )}
+              {feedback === 'idle' && (
+                <span className="text-xs text-slate-400 font-medium">
+                  Набирай цифры на клавиатуре и нажимай Enter
+                </span>
+              )}
+            </div>
+
+            {/* Visual Step-by-Step Explanation for Arithmetic (e.g. 8 + 5: 8 + 2 = 10, 10 + 3 = 13) */}
+            {(feedback === 'wrong' || feedback === 'timeout') && (
+              <div className="mt-2.5 w-full animate-pop-in">
+                <StepMathExplanation problem={currentProblem} onNext={moveToNextProblem} />
               </div>
             )}
-        </div>
+
+            {/* Ten-Frame visual aid for 2-term mistakes */}
+            {(feedback === 'wrong' || feedback === 'timeout') &&
+              currentProblem.operands.length === 2 &&
+              currentProblem.operators.length === 1 &&
+              (currentProblem.operators[0] === '+' || currentProblem.operators[0] === '−') && (
+                <div className="mt-2 animate-pop-in">
+                  <TenFrame
+                    a={currentProblem.operands[0]}
+                    b={currentProblem.operands[1]}
+                    operator={currentProblem.operators[0] === '+' ? '+' : '-'}
+                    showAnswer={true}
+                  />
+                </div>
+              )}
+          </div>
+        )}
       </div>
 
       {/* Bottom Area: Visual options prompt for TEST mode, plus input controls */}

@@ -212,16 +212,16 @@ export function ResultsScreen({
             </div>
           </div>
 
-          {/* Mistakes status note */}
+          {/* Mistakes / Rescue status note */}
           {result.mistakesCount > 0 ? (
-            <div className="flex items-center justify-center gap-2 text-xs font-semibold text-slate-600 bg-slate-50 py-1.5 px-3 rounded-xl border border-slate-200 shrink-0">
-              <XCircle className="w-3.5 h-3.5 text-rose-500" />
-              <span>Ошибок в сессии: {result.mistakesCount} (все повторены и отработаны)</span>
+            <div className="flex items-center justify-center gap-2 text-xs font-bold text-amber-950 bg-amber-50/90 py-1.5 px-3 rounded-xl border border-amber-300 shrink-0">
+              <span className="text-sm">🛟</span>
+              <span>Примеров спасено: {result.mistakesCount} (все отработаны и решены на отлично!)</span>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-2 text-xs font-semibold text-emerald-800 bg-emerald-50 py-1.5 px-3 rounded-xl border border-emerald-200 shrink-0">
+            <div className="flex items-center justify-center gap-2 text-xs font-bold text-emerald-800 bg-emerald-50 py-1.5 px-3 rounded-xl border border-emerald-200 shrink-0">
               <Award className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Идеальный результат без единой ошибки!</span>
+              <span>Идеальный результат: ни одному примеру не потребовалась помощь!</span>
             </div>
           )}
 

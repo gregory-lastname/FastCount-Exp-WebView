@@ -21,16 +21,16 @@ export function TenFrame({ a, b, operator, showAnswer }: TenFrameProps) {
 
           if (operator === '+') {
             if (index < a) {
-              dotColor = 'bg-sky-500 border-2 border-sky-600 shadow-sm';
+              dotColor = 'bg-amber-500 border-2 border-amber-600 shadow-sm';
             } else if (index < a + b) {
-              dotColor = 'bg-emerald-500 border-2 border-emerald-600 shadow-sm';
+              dotColor = 'bg-indigo-600 border-2 border-indigo-700 shadow-sm';
             }
           } else {
             // Subtraction: a dots in total, with b crossed out
             if (index < a - b) {
-              dotColor = 'bg-sky-500 border-2 border-sky-600 shadow-sm';
+              dotColor = 'bg-amber-500 border-2 border-amber-600 shadow-sm';
             } else if (index < a) {
-              dotColor = 'bg-rose-400 border-2 border-rose-500 opacity-60';
+              dotColor = 'bg-indigo-300 border-2 border-indigo-400 opacity-60';
             }
           }
 
@@ -40,25 +40,25 @@ export function TenFrame({ a, b, operator, showAnswer }: TenFrameProps) {
               className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center transition-all ${dotColor}`}
             >
               {operator === '-' && index >= a - b && index < a && (
-                <span className="text-white text-xs font-black">✕</span>
+                <span className="text-indigo-950 text-xs font-black">✕</span>
               )}
             </div>
           );
         })}
       </div>
       {showAnswer && (
-        <div className="text-xs text-slate-600 font-medium">
+        <div className="text-xs text-slate-700 font-semibold">
           {operator === '+' ? (
             <span>
-              <strong className="text-sky-600">{a}</strong> синих +{' '}
-              <strong className="text-emerald-600">{b}</strong> зелёных ={' '}
-              <strong className="text-slate-900">{total}</strong>
+              <strong className="text-amber-700 font-black">{a}</strong> оранжевых +{' '}
+              <strong className="text-indigo-700 font-black">{b}</strong> фиолетовых ={' '}
+              <strong className="text-slate-900 font-black">{total}</strong>
             </span>
           ) : (
             <span>
-              Было <strong className="text-sky-600">{a}</strong>, убрали{' '}
-              <strong className="text-rose-600">{b}</strong>, осталось{' '}
-              <strong className="text-slate-900">{a - b}</strong>
+              Было <strong className="text-amber-700 font-black">{a}</strong>, убрали{' '}
+              <strong className="text-indigo-700 font-black">{b}</strong>, осталось{' '}
+              <strong className="text-slate-900 font-black">{a - b}</strong>
             </span>
           )}
         </div>

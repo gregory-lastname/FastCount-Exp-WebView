@@ -9,6 +9,7 @@ import {
   PrizePet,
   SessionResult,
   SessionSettings,
+  UserProfile,
   UserStats,
 } from './types/math';
 import { soundManager } from './utils/audio';
@@ -17,10 +18,16 @@ import {
   DEFAULT_STATS,
   INITIAL_ACHIEVEMENTS,
   PET_CATALOG,
+  createUser,
+  deleteUser,
+  getCurrentUser,
+  getCurrentUserId,
   loadAchievements,
+  loadHistory,
   loadPrizes,
   loadSettings,
   loadStats,
+  loadUsers,
   resetAllData,
   rollPrize,
   saveAchievements,
@@ -28,6 +35,8 @@ import {
   saveSessionResult,
   saveSettings,
   saveStats,
+  setCurrentUserId,
+  updateUser,
 } from './utils/storage';
 import { Header } from './components/Header';
 import { MainMenu } from './components/MainMenu';
@@ -37,13 +46,19 @@ import { AchievementsModal } from './components/AchievementsModal';
 import { SettingsModal } from './components/SettingsModal';
 import { HelpModal } from './components/HelpModal';
 import { PrizeCollectionModal } from './components/PrizeCollectionModal';
+import { UserProfilesModal } from './components/UserProfilesModal';
+import { UserDashboardModal } from './components/UserDashboardModal';
 
 export default function App() {
   const [screen, setScreen] = useState<'menu' | 'trainer' | 'results'>('menu');
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+
   const [settings, setSettings] = useState<SessionSettings>(DEFAULT_SETTINGS);
   const [stats, setStats] = useState<UserStats>(DEFAULT_STATS);
   const [achievements, setAchievements] = useState<Achievement[]>(INITIAL_ACHIEVEMENTS);
   const [prizes, setPrizes] = useState<PrizePet[]>([]);
+  const [history, setHistory] = useState<SessionResult[]>([]);
 
   const [latestResult, setLatestResult] = useState<SessionResult | null>(null);
   const [newlyUnlocked, setNewlyUnlocked] = useState<Achievement[]>([]);
@@ -53,28 +68,79 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isPrizesOpen, setIsPrizesOpen] = useState(false);
+  const [isUsersModalOpen, setIsUsersModalOpen] = useState(false);
+  const [isDashboardOpen, setIsDashboardOpen] = useState(false);
 
   // Initialize data on load
   useEffect(() => {
-    const loadedSettings = loadSettings();
-    const loadedStats = loadStats();
-    const loadedAchievements = loadAchievements();
-    const loadedPrizes = loadPrizes();
+    const loadedUsers = loadUsers();
+    setUsers(loadedUsers);
+
+    const activeUser = getCurrentUser();
+    setCurrentUser(activeUser);
+
+    loadUserData(activeUser.id);
+  }, []);
+
+  const loadUserData = (userId: string) => {
+    const loadedSettings = loadSettings(userId);
+    const loadedStats = loadStats(userId);
+    const loadedAchievements = loadAchievements(userId);
+    const loadedPrizes = loadPrizes(userId);
+    const loadedHistory = loadHistory(userId);
 
     setSettings(loadedSettings);
     setStats(loadedStats);
     setAchievements(loadedAchievements);
     setPrizes(loadedPrizes);
+    setHistory(loadedHistory);
 
     soundManager.enabled = loadedSettings.soundEnabled;
     soundManager.theme = loadedSettings.soundTheme;
-  }, []);
+  };
+
+  // Switch active user
+  const handleSelectUser = (userId: string) => {
+    setCurrentUserId(userId);
+    const user = users.find((u) => u.id === userId) || getCurrentUser();
+    setCurrentUser(user);
+    loadUserData(userId);
+  };
+
+  // Create new user
+  const handleCreateUser = (name: string, avatar: string, grade: string) => {
+    const newUser = createUser(name, avatar, grade);
+    const allUsers = loadUsers();
+    setUsers(allUsers);
+    setCurrentUser(newUser);
+    loadUserData(newUser.id);
+  };
+
+  // Update existing user
+  const handleUpdateUser = (updatedUser: UserProfile) => {
+    updateUser(updatedUser);
+    const allUsers = loadUsers();
+    setUsers(allUsers);
+    if (currentUser?.id === updatedUser.id) {
+      setCurrentUser(updatedUser);
+    }
+  };
+
+  // Delete user
+  const handleDeleteUser = (userId: string) => {
+    deleteUser(userId);
+    const allUsers = loadUsers();
+    setUsers(allUsers);
+    const active = getCurrentUser();
+    setCurrentUser(active);
+    loadUserData(active.id);
+  };
 
   // Update Settings handler
   const handleUpdateSettings = (newSettingsPartial: Partial<SessionSettings>) => {
     setSettings((prev) => {
       const updated = { ...prev, ...newSettingsPartial };
-      saveSettings(updated);
+      saveSettings(updated, currentUser?.id);
       if (typeof newSettingsPartial.soundEnabled === 'boolean') {
         soundManager.enabled = newSettingsPartial.soundEnabled;
       }
@@ -98,9 +164,11 @@ export default function App() {
 
   // Finish session handler
   const handleFinishSession = (result: SessionResult) => {
+    const uid = currentUser?.id;
+
     // 1. Roll a collectible pet prize based on merit & difficulty
     const awardedPrize = rollPrize(result, prizes);
-    const updatedPrizes = loadPrizes(); // includes newly rolled prize
+    const updatedPrizes = loadPrizes(uid);
     setPrizes(updatedPrizes);
 
     const fullResult: SessionResult = {
@@ -109,7 +177,8 @@ export default function App() {
     };
 
     setLatestResult(fullResult);
-    saveSessionResult(fullResult);
+    saveSessionResult(fullResult, uid);
+    setHistory((prev) => [fullResult, ...prev]);
 
     // 2. Compute updated user stats
     const updatedStats: UserStats = {
@@ -124,7 +193,7 @@ export default function App() {
         : result.averageTimeSec,
     };
     setStats(updatedStats);
-    saveStats(updatedStats);
+    saveStats(updatedStats, uid);
 
     // 3. Check achievement unlock conditions
     const freshlyUnlocked: Achievement[] = [];
@@ -152,6 +221,9 @@ export default function App() {
           break;
         case 'subtraction_master':
           shouldUnlock = result.mode === 'subtraction' && result.stars === 5;
+          break;
+        case 'bond_master':
+          shouldUnlock = result.mode === 'number_bonds' && result.stars === 5;
           break;
         case 'super_streak':
           shouldUnlock = result.bestStreak >= 20;
@@ -196,18 +268,20 @@ export default function App() {
     });
 
     setAchievements(updatedAchievements);
-    saveAchievements(updatedAchievements);
+    saveAchievements(updatedAchievements, uid);
     setNewlyUnlocked(freshlyUnlocked);
     setScreen('results');
   };
 
-  // Reset all user data
+  // Reset current user data
   const handleResetAllData = () => {
     resetAllData();
+    const active = getCurrentUser();
     setStats(DEFAULT_STATS);
     setAchievements(INITIAL_ACHIEVEMENTS);
     setSettings(DEFAULT_SETTINGS);
     setPrizes([]);
+    setHistory([]);
     soundManager.enabled = true;
     soundManager.theme = 'funny';
     setScreen('menu');
@@ -217,6 +291,7 @@ export default function App() {
     <div className="h-screen max-h-screen w-screen overflow-hidden bg-linear-to-b from-amber-50/70 via-amber-50/30 to-orange-50/50 text-slate-900 flex flex-col font-sans select-none antialiased">
       {/* Top persistent compact header */}
       <Header
+        currentUser={currentUser || undefined}
         starsCount={stats.totalStars}
         prizesCount={{
           unlocked: prizes.length,
@@ -229,6 +304,8 @@ export default function App() {
         onOpenAchievements={() => setIsAchievementsOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenHelp={() => setIsHelpOpen(true)}
+        onOpenUsers={() => setIsUsersModalOpen(true)}
+        onOpenDashboard={() => setIsDashboardOpen(true)}
       />
 
       {/* Main Single-Screen Content (guaranteed no scrollbars) */}
@@ -237,6 +314,7 @@ export default function App() {
           <MainMenu
             settings={settings}
             stats={stats}
+            currentUser={currentUser || undefined}
             achievementsCount={{
               unlocked: achievements.filter((a) => a.unlocked).length,
               total: achievements.length,
@@ -252,6 +330,8 @@ export default function App() {
             onOpenPrizes={() => setIsPrizesOpen(true)}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenHelp={() => setIsHelpOpen(true)}
+            onOpenUsers={() => setIsUsersModalOpen(true)}
+            onOpenDashboard={() => setIsDashboardOpen(true)}
           />
         )}
 
@@ -274,6 +354,30 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* User Profiles Modal */}
+      <UserProfilesModal
+        isOpen={isUsersModalOpen}
+        users={users}
+        currentUserId={currentUser?.id || ''}
+        onSelectUser={handleSelectUser}
+        onCreateUser={handleCreateUser}
+        onUpdateUser={handleUpdateUser}
+        onDeleteUser={handleDeleteUser}
+        onClose={() => setIsUsersModalOpen(false)}
+      />
+
+      {/* User Personal Dashboard & Printable Report / Diploma Modal */}
+      {currentUser && (
+        <UserDashboardModal
+          isOpen={isDashboardOpen}
+          user={currentUser}
+          stats={stats}
+          history={history}
+          prizes={prizes}
+          onClose={() => setIsDashboardOpen(false)}
+        />
+      )}
 
       {/* Prize Collection Modal */}
       <PrizeCollectionModal

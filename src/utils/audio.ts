@@ -192,6 +192,26 @@ class SoundEffects {
   }
 
   /**
+   * Exciting level up or boss round entry sound
+   */
+  public playLevelUp() {
+    if (!this.enabled) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+
+      const notes = [440.0, 554.37, 659.25, 880.0]; // A4, C#5, E5, A5
+      const now = this.ctx.currentTime;
+
+      notes.forEach((freq, idx) => {
+        this.playChimeNote(freq, now + idx * 0.07, 0.4, 0.12);
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
    * Interactive chest opening sound
    */
   public playChestOpen() {

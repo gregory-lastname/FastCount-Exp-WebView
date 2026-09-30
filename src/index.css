@@ -37,3 +37,14 @@
 .btn-tactile:active {
   transform: translateY(3px);
 }
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  header, button, nav, .print\:hidden {
+    display: none !important;
+  }
+}

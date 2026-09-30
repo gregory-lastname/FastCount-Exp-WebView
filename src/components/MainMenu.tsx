@@ -1,9 +1,13 @@
 import React, { useEffect } from 'react';
 import {
+  BarChart3,
   Calculator,
+  ChevronDown,
   Divide,
   Flame,
   Gift,
+  Grid,
+  Home,
   Keyboard,
   ListFilter,
   Minus,
@@ -11,8 +15,11 @@ import {
   Play,
   Plus,
   Shuffle,
+  Sliders,
   Sparkles,
   Timer,
+  User,
+  Users,
   X,
   Zap,
 } from 'lucide-react';
@@ -20,10 +27,12 @@ import {
   DifficultyLevel,
   GameMode,
   InputMode,
+  NumberBondTarget,
   PrizePet,
   SessionSettings,
   SoundTheme,
   TableRange,
+  UserProfile,
   UserStats,
 } from '../types/math';
 import { soundManager } from '../utils/audio';
@@ -31,6 +40,7 @@ import { soundManager } from '../utils/audio';
 interface MainMenuProps {
   settings: SessionSettings;
   stats: UserStats;
+  currentUser?: UserProfile;
   achievementsCount: { unlocked: number; total: number };
   prizesCount: { unlocked: number; total: number };
   latestPrize?: PrizePet | null;
@@ -40,11 +50,14 @@ interface MainMenuProps {
   onOpenPrizes: () => void;
   onOpenSettings: () => void;
   onOpenHelp: () => void;
+  onOpenUsers: () => void;
+  onOpenDashboard: () => void;
 }
 
 export function MainMenu({
   settings,
   stats,
+  currentUser,
   achievementsCount,
   prizesCount,
   latestPrize,
@@ -52,6 +65,8 @@ export function MainMenu({
   onStartGame,
   onOpenAchievements,
   onOpenPrizes,
+  onOpenUsers,
+  onOpenDashboard,
 }: MainMenuProps) {
   // Listen for Enter / Space to start quickly
   useEffect(() => {
@@ -74,6 +89,13 @@ export function MainMenu({
     example: string;
     iconComponent: React.ReactNode;
   }[] = [
+    {
+      id: 'number_bonds',
+      title: 'Состав числа',
+      formula: '🏠 Домик',
+      example: '10 = 7 + ?',
+      iconComponent: <Home className="w-4 h-4 text-amber-600 stroke-[2.5]" />,
+    },
     {
       id: 'addition',
       title: 'Сложение',
@@ -100,7 +122,6 @@ export function MainMenu({
       title: 'Умножение',
       formula: 'a \u00D7 b',
       example: '3 \u00D7 4 = 12',
-      // Pure SVG icon with 2 diagonal lines: CANNOT turn into a plus sign in any font or build!
       iconComponent: (
         <svg
           viewBox="0 0 24 24"
@@ -133,18 +154,35 @@ export function MainMenu({
     settings.mode === 'division' ||
     settings.mode === 'all_mixed';
 
+  const isNumberBond = settings.mode === 'number_bonds';
   const isAdaptive = settings.mode === 'adaptive_training';
 
   return (
     <div className="w-full max-w-5xl mx-auto my-auto flex flex-col gap-2.5 px-2 py-1 select-none animate-pop-in">
-      {/* 1. TOP BAR: Welcoming status and achievements */}
+      {/* 1. TOP BAR: Welcoming status, user profile & dashboard */}
       <div className="bg-white rounded-2xl px-4 py-2 border border-amber-200/90 shadow-2xs flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-amber-400 border border-amber-500 flex items-center justify-center text-lg shadow-2xs">
-            🧮
-          </div>
-          <div>
-            <h2 className="text-sm sm:text-base font-black text-slate-900 leading-tight">
+        <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+          {/* Active User Switcher Pill */}
+          {currentUser && (
+            <button
+              onClick={() => {
+                soundManager.playKeyTap();
+                onOpenUsers();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-100/90 hover:bg-amber-200 border border-amber-300 rounded-xl text-amber-950 font-black text-xs shadow-2xs transition-colors cursor-pointer"
+              title="Сменить ученика или добавить нового"
+            >
+              <span className="text-base leading-none">{currentUser.avatar}</span>
+              <span className="truncate max-w-[100px] sm:max-w-[130px]">{currentUser.name}</span>
+              <span className="text-[10px] text-amber-800 font-semibold hidden sm:inline">
+                ({currentUser.grade || '2 класс'})
+              </span>
+              <ChevronDown className="w-3.5 h-3.5 text-amber-800 ml-0.5" />
+            </button>
+          )}
+
+          <div className="hidden md:block">
+            <h2 className="text-sm font-black text-slate-900 leading-tight">
               Тренажёр устного счёта · 2 класс
             </h2>
             <p className="text-[11px] text-slate-500 font-semibold">
@@ -153,8 +191,21 @@ export function MainMenu({
           </div>
         </div>
 
-        {/* Right mini stats strip */}
-        <div className="flex items-center gap-2 sm:gap-3 text-xs font-black">
+        {/* Right mini stats strip & Dashboard Button */}
+        <div className="flex items-center gap-2 sm:gap-2.5 text-xs font-black">
+          {/* Personal Report & Dashboard Button */}
+          <button
+            onClick={() => {
+              soundManager.playKeyTap();
+              onOpenDashboard();
+            }}
+            className="flex items-center gap-1.5 text-sky-950 bg-sky-100 hover:bg-sky-200 px-3 py-1.5 rounded-xl border border-sky-300 shadow-2xs transition-colors cursor-pointer"
+            title="Открыть персональный дашборд успехов и распечатать похвальную грамоту"
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-sky-700" />
+            <span>Отчёт и Грамота</span>
+          </button>
+
           <div className="flex items-center gap-1 text-slate-700 bg-slate-100 px-2.5 py-1 rounded-xl">
             <span>Решено:</span>
             <span className="text-slate-900 font-mono text-xs">{stats.totalSolved}</span>
@@ -163,11 +214,6 @@ export function MainMenu({
           <div className="flex items-center gap-1 text-amber-900 bg-amber-100/80 px-2.5 py-1 rounded-xl border border-amber-200">
             <span>⭐</span>
             <span className="font-mono text-xs">{stats.totalStars}</span>
-          </div>
-
-          <div className="flex items-center gap-1 text-orange-900 bg-orange-100/80 px-2.5 py-1 rounded-xl border border-orange-200">
-            <span>🔥</span>
-            <span className="font-mono text-xs">{stats.highestStreak}</span>
           </div>
 
           <button
@@ -185,9 +231,9 @@ export function MainMenu({
         </div>
       </div>
 
-      {/* 2. MODE SELECTION BENTO BLOCK: FEATURED ADAPTIVE TRAINING + 6 CLASSIC MODES */}
+      {/* 2. MODE SELECTION BENTO BLOCK */}
       <div className="bg-white rounded-2xl p-3 sm:p-3.5 border border-slate-200 shadow-2xs space-y-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="w-5 h-5 rounded-md bg-amber-500 text-white font-black text-xs flex items-center justify-center shadow-2xs">
               1
@@ -196,39 +242,9 @@ export function MainMenu({
               Режим счёта
             </span>
           </div>
-
-          {/* Table range switch if applicable */}
-          {isTableApplicable && (
-            <div className="flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-300">
-              <span className="text-[11px] font-bold text-amber-950">Таблица:</span>
-              <button
-                onClick={() => {
-                  soundManager.playKeyTap();
-                  onUpdateSettings({ tableRange: 'up_to_5' });
-                }}
-                className={`px-2 py-0.5 text-xs font-black rounded transition-all ${
-                  settings.tableRange === 'up_to_5'
-                    ? 'bg-amber-400 text-amber-950 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                до 5 × 5
-              </button>
-              <button
-                onClick={() => {
-                  soundManager.playKeyTap();
-                  onUpdateSettings({ tableRange: 'up_to_9' });
-                }}
-                className={`px-2 py-0.5 text-xs font-black rounded transition-all ${
-                  settings.tableRange === 'up_to_9'
-                    ? 'bg-amber-400 text-amber-950 shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                до 9 × 9
-              </button>
-            </div>
-          )}
+          <span className="text-[11px] font-semibold text-slate-400 hidden sm:inline">
+            Выбери один из 8 режимов тренировки
+          </span>
         </div>
 
         {/* HERO ADAPTIVE TRAINING BUTTON */}
@@ -268,8 +284,8 @@ export function MainMenu({
           </div>
         </button>
 
-        {/* 6 CLASSIC MODES (3x2 grid, clean SVG icons, no font bugs!) */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {/* 7 SPECIALIZED & CLASSIC MODES (Grid: Addition, Subtraction, Number Bonds, 3 Terms, Mult, Div, Super-Mix) */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
           {classicModes.map((m) => {
             const isSelected = settings.mode === m.id;
             return (
@@ -279,7 +295,7 @@ export function MainMenu({
                   soundManager.playKeyTap();
                   onUpdateSettings({ mode: m.id });
                 }}
-                className={`btn-tactile h-[68px] sm:h-[72px] px-3 py-1.5 rounded-xl border-2 text-left flex flex-col justify-between transition-all cursor-pointer ${
+                className={`btn-tactile h-[68px] sm:h-[72px] px-2.5 py-1.5 rounded-xl border-2 text-left flex flex-col justify-between transition-all cursor-pointer ${
                   isSelected
                     ? 'border-amber-500 bg-amber-50/90 ring-2 ring-amber-300 shadow-2xs'
                     : 'border-slate-200 bg-white hover:border-amber-300 hover:bg-slate-50/80'
@@ -288,7 +304,7 @@ export function MainMenu({
                 {/* Top: Large crisp formula & SVG Icon */}
                 <div className="flex items-center justify-between w-full">
                   <span
-                    className={`font-mono text-xs sm:text-sm font-black px-2 py-0.5 rounded-md tracking-wider transition-colors ${
+                    className={`font-mono text-xs font-black px-1.5 py-0.5 rounded tracking-wider transition-colors ${
                       isSelected
                         ? 'bg-amber-500 text-white shadow-2xs'
                         : 'bg-slate-100 text-slate-900 border border-slate-200'
@@ -296,19 +312,19 @@ export function MainMenu({
                   >
                     {m.formula}
                   </span>
-                  <div className="p-1 rounded-md bg-slate-50 border border-slate-200 shadow-2xs">
+                  <div className="p-0.5 rounded bg-slate-50 border border-slate-200 shadow-2xs">
                     {m.iconComponent}
                   </div>
                 </div>
 
                 {/* Bottom: Title & Example */}
-                <div className="flex items-baseline justify-between w-full mt-1">
-                  <span className="text-xs sm:text-sm font-black text-slate-900">
+                <div className="w-full mt-1">
+                  <div className="text-xs font-black text-slate-900 truncate">
                     {m.title}
-                  </span>
-                  <span className="text-[10px] sm:text-[11px] text-slate-500 font-mono font-medium">
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono font-medium truncate">
                     {m.example}
-                  </span>
+                  </div>
                 </div>
               </button>
             );
@@ -331,7 +347,7 @@ export function MainMenu({
 
           <div className="space-y-2 text-xs">
             {/* Input Mode */}
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 min-h-[36px]">
               <span className="font-bold text-slate-700 whitespace-nowrap">Ввод ответа:</span>
               <div className="flex gap-1.5 flex-1 max-w-xs justify-end">
                 <button
@@ -362,21 +378,144 @@ export function MainMenu({
                   title="На экране показываются 4 варианта ответов для насмотренности, а ввод осуществляется с клавиатуры"
                 >
                   <ListFilter className="w-3.5 h-3.5" />
-                  <span>Тест (варианты-подсказки)</span>
+                  <span>Тест (варианты)</span>
                 </button>
               </div>
             </div>
 
-            {/* Difficulty Level (disabled if adaptive mode) */}
-            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
-              <span className="font-bold text-slate-700 whitespace-nowrap">Сложность:</span>
-              {isAdaptive ? (
-                <div className="text-[11px] font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
-                  ⚡ Автоподбор (уровни 1–5)
+            {/* Unified Difficulty Row (Contextual for each mode: Number Bonds, Multiplication, Arithmetic) */}
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 min-h-[38px]">
+              <span className="font-bold text-slate-700 whitespace-nowrap">
+                {isNumberBond ? 'Состав числа:' : isTableApplicable && settings.mode !== 'all_mixed' ? 'Диапазон:' : 'Сложность:'}
+              </span>
+
+              {isNumberBond ? (
+                /* Number Bonds mode: Auto, All to 10, to 20, Specific Number Dropdown */
+                <div className="flex gap-1.5 flex-1 max-w-sm justify-end items-center flex-wrap sm:flex-nowrap">
+                  <button
+                    onClick={() => {
+                      soundManager.playKeyTap();
+                      onUpdateSettings({ difficulty: 'differential', numberBondTarget: 'auto' });
+                    }}
+                    className={`btn-tactile px-2 py-1 rounded-xl border text-xs font-black flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
+                      settings.difficulty === 'differential' || settings.numberBondTarget === 'auto'
+                        ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-2xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>⚡ Авто</span>
+                    <span className="text-[10px] opacity-75 font-mono">(1–5)</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      soundManager.playKeyTap();
+                      onUpdateSettings({ difficulty: 2, numberBondTarget: 'all_to_10' });
+                    }}
+                    className={`btn-tactile px-2 py-1 rounded-xl border text-xs font-black flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
+                      settings.difficulty !== 'differential' && settings.numberBondTarget === 'all_to_10'
+                        ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-2xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>Все до 10</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      soundManager.playKeyTap();
+                      onUpdateSettings({ difficulty: 3, numberBondTarget: 'to_20' });
+                    }}
+                    className={`btn-tactile px-2 py-1 rounded-xl border text-xs font-black flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
+                      settings.difficulty !== 'differential' && settings.numberBondTarget === 'to_20'
+                        ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-2xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>до 20</span>
+                  </button>
+
+                  <select
+                    value={
+                      ['5', '6', '7', '8', '9', '10'].includes(settings.numberBondTarget) &&
+                      settings.difficulty !== 'differential'
+                        ? settings.numberBondTarget
+                        : ''
+                    }
+                    onChange={(e) => {
+                      soundManager.playKeyTap();
+                      const val = e.target.value as NumberBondTarget;
+                      if (val) {
+                        onUpdateSettings({ difficulty: 2, numberBondTarget: val });
+                      }
+                    }}
+                    className={`btn-tactile px-2 py-1 rounded-xl border text-xs font-black transition-all cursor-pointer outline-hidden ${
+                      ['5', '6', '7', '8', '9', '10'].includes(settings.numberBondTarget) &&
+                      settings.difficulty !== 'differential'
+                        ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-2xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <option value="" disabled>Число ▾</option>
+                    <option value="5">Состав 5</option>
+                    <option value="6">Состав 6</option>
+                    <option value="7">Состав 7</option>
+                    <option value="8">Состав 8</option>
+                    <option value="9">Состав 9</option>
+                    <option value="10">Состав 10</option>
+                  </select>
+                </div>
+              ) : isTableApplicable && settings.mode !== 'all_mixed' ? (
+                /* Multiplication / Division mode: Auto, up to 5x5, up to 9x9 */
+                <div className="flex gap-1.5 flex-1 max-w-sm justify-end items-center flex-wrap sm:flex-nowrap">
+                  <button
+                    onClick={() => {
+                      soundManager.playKeyTap();
+                      onUpdateSettings({ difficulty: 'differential' });
+                    }}
+                    className={`btn-tactile px-2.5 py-1 rounded-xl border text-xs font-black flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
+                      settings.difficulty === 'differential'
+                        ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-2xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>⚡ Авто</span>
+                    <span className="text-[10px] opacity-75 font-mono">(1–5)</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      soundManager.playKeyTap();
+                      onUpdateSettings({ difficulty: 1, tableRange: 'up_to_5' });
+                    }}
+                    className={`btn-tactile px-2.5 py-1 rounded-xl border text-xs font-black flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
+                      settings.difficulty !== 'differential' && settings.tableRange === 'up_to_5'
+                        ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-2xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>до 5 × 5</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      soundManager.playKeyTap();
+                      onUpdateSettings({ difficulty: 2, tableRange: 'up_to_9' });
+                    }}
+                    className={`btn-tactile px-2.5 py-1 rounded-xl border text-xs font-black flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
+                      settings.difficulty !== 'differential' && settings.tableRange === 'up_to_9'
+                        ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-2xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>до 9 × 9</span>
+                  </button>
                 </div>
               ) : (
-                <div className="flex gap-1.5 flex-1 max-w-xs justify-end">
+                /* Classic Arithmetic modes & Adaptive Training */
+                <div className="flex gap-1.5 flex-1 max-w-sm justify-end flex-wrap sm:flex-nowrap">
                   {[
+                    { level: 'differential' as const, name: '⚡ Авто', tag: '1–5' },
                     { level: 1 as const, name: '1 ур.', tag: 'до 5' },
                     { level: 2 as const, name: '2 ур.', tag: 'до 10' },
                     { level: 3 as const, name: '3 ур.', tag: 'до 20' },
@@ -387,9 +526,12 @@ export function MainMenu({
                         soundManager.playKeyTap();
                         onUpdateSettings({ difficulty: d.level });
                       }}
-                      className={`btn-tactile px-2.5 py-1 rounded-xl border text-xs font-black flex items-center gap-1 transition-all cursor-pointer ${
-                        settings.difficulty === d.level
+                      disabled={isAdaptive && d.level !== 'differential'}
+                      className={`btn-tactile px-2 py-1 rounded-xl border text-xs font-black flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
+                        (isAdaptive ? d.level === 'differential' : settings.difficulty === d.level)
                           ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-2xs'
+                          : isAdaptive
+                          ? 'border-slate-100 bg-slate-50/60 text-slate-300 cursor-not-allowed opacity-40'
                           : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                       }`}
                     >
@@ -402,7 +544,7 @@ export function MainMenu({
             </div>
 
             {/* Session Length */}
-            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 min-h-[38px]">
               <span className="font-bold text-slate-700 whitespace-nowrap">Примеров:</span>
               <div className="flex gap-1.5 flex-1 max-w-xs justify-end">
                 {([10, 20, 30] as const).map((len) => (
@@ -412,9 +554,12 @@ export function MainMenu({
                       soundManager.playKeyTap();
                       onUpdateSettings({ sessionLength: len });
                     }}
+                    disabled={isAdaptive}
                     className={`btn-tactile px-3 py-1 rounded-xl border text-xs font-black transition-all cursor-pointer ${
-                      settings.sessionLength === len
+                      (isAdaptive ? len === 30 : settings.sessionLength === len)
                         ? 'border-amber-500 bg-amber-400 text-amber-950 shadow-2xs'
+                        : isAdaptive
+                        ? 'border-slate-100 bg-slate-50/60 text-slate-300 cursor-not-allowed opacity-40'
                         : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
@@ -424,8 +569,8 @@ export function MainMenu({
               </div>
             </div>
 
-            {/* Timer & Sound Row */}
-            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+            {/* Timer & Sound Row: CLEAR & DIRECT TIMER TOGGLE + SECONDS SELECTION */}
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 flex-wrap">
               <div className="flex items-center gap-1.5">
                 <Timer className="w-3.5 h-3.5 text-amber-600" />
                 <span className="font-bold text-slate-700">Таймер:</span>
@@ -436,12 +581,35 @@ export function MainMenu({
                   }}
                   className={`btn-tactile px-2.5 py-0.5 rounded-lg border text-xs font-black transition-all cursor-pointer ${
                     settings.timerEnabled
-                      ? 'border-amber-500 bg-amber-400 text-amber-950'
-                      : 'border-slate-200 bg-slate-50 text-slate-500'
+                      ? 'border-emerald-500 bg-emerald-500 text-white shadow-2xs'
+                      : 'border-slate-200 bg-slate-100 text-slate-500 hover:bg-slate-200'
                   }`}
+                  title={settings.timerEnabled ? 'Выключить таймер' : 'Включить таймер'}
                 >
-                  {settings.timerEnabled ? `${settings.timerSeconds} сек` : 'Выкл'}
+                  {settings.timerEnabled ? 'ВКЛ' : 'ВЫКЛ'}
                 </button>
+
+                {/* Duration options directly visible when timer is on */}
+                {settings.timerEnabled && (
+                  <div className="flex items-center gap-1 animate-pop-in">
+                    {([5, 8, 10, 15] as const).map((sec) => (
+                      <button
+                        key={sec}
+                        onClick={() => {
+                          soundManager.playKeyTap();
+                          onUpdateSettings({ timerSeconds: sec });
+                        }}
+                        className={`px-1.5 py-0.5 rounded text-[11px] font-black border transition-all cursor-pointer ${
+                          settings.timerSeconds === sec
+                            ? 'bg-amber-400 border-amber-500 text-amber-950 shadow-2xs'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {sec}с
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -527,3 +695,4 @@ export function MainMenu({
     </div>
   );
 }
+
